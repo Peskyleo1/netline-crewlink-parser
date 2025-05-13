@@ -1,31 +1,51 @@
 import pdfplumber
+from itertools import groupby
 
-# Path to your PDF file
-pdf_path = "your_roster.pdf"  # <-- replace with actual path
+# === SETTINGS ===
+pdf_path = "your_roster.pdf"  # <-- change this to your file path
+column = "left"  # or 'right'
 
-# Choose which half to extract: 'left' or 'right'
-column = "left"
-
-# Open the PDF and extract based on x0 position
-split_x = None
+# === EXTRACT WORDS FROM HALF PAGE ===
 lines = []
 
 with pdfplumber.open(pdf_path) as pdf:
     first_page = pdf.pages[0]
-    page_width = first_page.width
-    split_x = page_width / 2  # vertical midpoint, typically around 420
+    split_x = first_page.width / 2
 
     for page in pdf.pages:
         words = page.extract_words()
         selected_words = [w for w in words if (w["x0"] < split_x if column == "left" else w["x0"] >= split_x)]
 
-        # Group words into lines by Y-coordinate (approximate line height)
-        from itertools import groupby
-
-        for _, group in groupby(sorted(selected_words, key=lambda w: (int(w["top"]), w["x0"])), key=lambda w: int(w["top"])):
+        # Group into lines by Y position
+        for _, group in groupby(sorted(selected_words, key=lambda w: (int(w['top']), w['x0'])), key=lambda w: int(w['top'])):
             line = " ".join(word["text"] for word in group)
             lines.append(line)
 
-# Output the text
-text_output = "\n".join(lines)
-print(text_output)
+# === CLEAN: keep only block between start and next "Individual duty plan for" ===
+def clean_roster_text(lines):
+    # Find start (first appearance of the header)
+    try:
+        start_idx = next(i for i, line in enumerate(lines) if line.strip() == "date H duty R dep arr AC info")
+    except StopIteration:
+        start_idx = 0
+
+    # Find next occurrence of the "Individual duty plan" after that
+    try:
+        end_idx = next(i for i in range(start_idx + 1, len(lines)) if "Individual duty plan for" in lines[i])
+    except StopIteration:
+        end_idx = len(lines)
+
+    return lines[start_idx + 1:end_idx]
+
+cleaned_lines = clean_roster_text(lines)
+
+# === OUTPUT ===
+# Print to terminal
+for line in cleaned_lines:
+    print(line)
+
+# Save to file
+with open(f"{column}_column_cleaned.txt", "w", encoding="utf-8") as f:
+    f.write("\n".join(cleaned_lines))
+
+print(f"\n✅ Extracted and cleaned text saved to: {column}_column_cleaned.txt")
